@@ -118,13 +118,13 @@ export class SyncEngineeringLogsService {
         rich_text: [{ text: { content: this.limitText(log.content) } }],
       },
       Scope: {
-        multi_select: log.scope ? [{ name: this.limitText(log.scope, 100) }] : [],
+        select: log.scope ? { name: this.limitText(log.scope, 100) } : null,
       },
       Decision: {
         rich_text: log.decision ? [{ text: { content: this.limitText(log.decision) } }] : [],
       },
       Friction: {
-        select: { name: normalizedFriction },
+        rich_text: [{ text: { content: normalizedFriction } }],
       },
       'Friction Notes': {
         rich_text: log.friction ? [{ text: { content: this.limitText(log.friction) } }] : [],
