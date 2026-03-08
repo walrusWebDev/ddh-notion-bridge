@@ -1,9 +1,9 @@
 // src/run-sync.ts
 import { syncLatestEngineeringLogs } from './services/logs/sync-engineering-logs.service.js';
-import { syncLatestJournalLogs } from './services/logs/sync-journal-logs.service.js'; // New
+import { syncLatestJournalLogs } from './services/logs/sync-journal-logs.service.js';
 
 async function run() {
-  const USER_ID = 1; // Your Bridges user ID
+  const USER_ID = 1;
   
   console.log('🚀 Syncing full history to Notion...');
   
