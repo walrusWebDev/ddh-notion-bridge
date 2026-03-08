@@ -4,6 +4,7 @@ import { query } from '../../db/client.js';
 import type { JournalLogRow } from '../../db/types/journal-log.js';
 
 const ORIGIN_OPTIONS = new Set(['wordpress', 'mcp']);
+const TITLE_PROPERTY = 'Name';
 
 export interface SyncJournalLogsResult {
   processed: number;
@@ -99,7 +100,7 @@ export class SyncJournalLogsService {
     const response = await this.notion.databases.query({
       database_id: this.journalSummariesDbId,
       filter: {
-        property: 'Title',
+        property: TITLE_PROPERTY,
         title: {
           equals: title,
         },
@@ -117,7 +118,7 @@ export class SyncJournalLogsService {
     const answersJson = JSON.stringify(log.answers ?? null);
 
     return {
-      Title: {
+      [TITLE_PROPERTY]: {
         title: [{ text: { content: title } }],
       },
       'User ID': {
