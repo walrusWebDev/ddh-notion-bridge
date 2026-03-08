@@ -2,8 +2,8 @@ import '../config/env.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { syncLatestEngineeringLogs } from '../services/logs/sync-engineering-logs.service.js';
-import { syncLatestJournalLogs } from '../services/logs/sync-journal-logs.service.js';
+import { getEngineeringLogs, syncLatestEngineeringLogs } from '../services/logs/sync-engineering-logs.service.js';
+import { getJournalLogs, syncLatestJournalLogs } from '../services/logs/sync-journal-logs.service.js';
 
 const LIMIT_MIN = 1;
 const LIMIT_MAX = 250;
@@ -83,6 +83,50 @@ server.registerTool(
 	}
 );
 
+server.registerTool(
+	'get_logs_for_analysis',
+	{
+		description: 'Fetch raw engineering logs from PostgreSQL for technical review.',
+		inputSchema: syncInputSchema,
+	},
+	async ({ userId, limit }) => {
+		const logs = await getEngineeringLogs(userId, limit ?? DEFAULT_LIMIT);
+
+		return {
+			content: [
+				{
+					type: 'text',
+					text: JSON.stringify(logs, null, 2),
+				},
+			],
+		};
+	}
+);
+
+server.registerTool(
+	'get_engineering_analysis',
+	{
+		description: 'Read raw engineering logs for senior developer feedback.',
+		inputSchema: syncInputSchema,
+	},
+	async ({ userId, limit }) => {
+		const logs = await getEngineeringLogs(userId, limit ?? DEFAULT_LIMIT);
+		return { content: [{ type: 'text', text: JSON.stringify(logs, null, 2) }] };
+	}
+);
+
+server.registerTool(
+	'get_journal_analysis',
+	{
+		description: 'Read daily reflections and journal entries for growth analysis.',
+		inputSchema: syncInputSchema,
+	},
+	async ({ userId, limit }) => {
+		const logs = await getJournalLogs(userId, limit ?? DEFAULT_LIMIT);
+		return { content: [{ type: 'text', text: JSON.stringify(logs, null, 2) }] };
+	}
+);
+
 export const startMcpServer = async () => {
 	const transport = new StdioServerTransport();
 	await server.connect(transport);
@@ -95,3 +139,25 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 		process.exit(1);
 	});
 }
+
+import express from 'express';
+
+const app = express();
+const WEBHOOK_PORT = 3333; // Pick a port that doesn't collide with your other tools
+
+app.post('/webhook/sync', async (req, res) => {
+	console.error('🔔 Local Sync Signal Received!');
+	try {
+		// Trigger both syncs immediately
+		await syncLatestEngineeringLogs(1, 5);
+		await syncLatestJournalLogs(1, 5);
+		res.status(200).json({ status: 'success', message: 'Notion Tables Synced' });
+	} catch (err) {
+		console.error('❌ Webhook Sync Failed:', err);
+		res.status(500).json({ status: 'error' });
+	}
+});
+
+app.listen(WEBHOOK_PORT, () => {
+	console.error(`🚀 Local Webhook Listener active on port ${WEBHOOK_PORT}`);
+});
