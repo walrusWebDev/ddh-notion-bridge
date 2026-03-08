@@ -1,3 +1,6 @@
-// Lightweight wrapper re-exporting journal sync from services/logs
-export { syncLatestJournalLogs } from './logs/sync-journal-logs.service.ts';
+import { SyncJournalLogsService } from './logs/sync-journal-logs.service.js';
 
+export const syncLatestJournalLogs = async (userId: number, limit = 5) => {
+	const service = new SyncJournalLogsService();
+	return service.syncLatestJournalLogs(userId, { limit });
+};
