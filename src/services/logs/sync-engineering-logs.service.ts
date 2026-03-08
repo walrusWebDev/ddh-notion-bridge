@@ -5,6 +5,7 @@ import type { EngineeringLogRow } from '../../db/types/engineering-log.js';
 
 const ORIGIN_OPTIONS = new Set(['cli', 'wordpress', 'telemetry', 'mcp']);
 const FRICTION_OPTIONS = new Set(['None', 'Low', 'Medium', 'High', 'Blocked']);
+const TITLE_PROPERTY = 'Name';
 
 export interface SyncEngineeringLogsResult {
   processed: number;
@@ -84,7 +85,7 @@ export class SyncEngineeringLogsService {
     const response = await this.notion.databases.query({
       database_id: this.engineeringLogsDbId,
       filter: {
-        property: 'Title',
+        property: TITLE_PROPERTY,
         title: {
           equals: title,
         },
@@ -104,7 +105,7 @@ export class SyncEngineeringLogsService {
     const tags = Array.isArray(log.tags) ? log.tags.filter(Boolean) : [];
 
     return {
-      Title: {
+      [TITLE_PROPERTY]: {
         title: [{ text: { content: `LOG-${log.id}` } }],
       },
       'User ID': {
