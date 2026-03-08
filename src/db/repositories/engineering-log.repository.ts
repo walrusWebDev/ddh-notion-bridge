@@ -11,6 +11,7 @@ export class EngineeringLogRepository {
       SELECT
         id,
         user_id,
+        project,
         content,
         scope,
         decision,
@@ -38,6 +39,7 @@ export class EngineeringLogRepository {
       SELECT
         id,
         user_id,
+        project,
         content,
         scope,
         decision,
@@ -74,6 +76,7 @@ export class EngineeringLogRepository {
       SELECT
         id,
         user_id,
+        project,
         content,
         scope,
         decision,

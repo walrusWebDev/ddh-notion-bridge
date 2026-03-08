@@ -3,7 +3,10 @@ import { env } from '../../config/env.js';
 import { query } from '../../db/client.js';
 import type { JournalLogRow } from '../../db/types/journal-log.js';
 
-const ORIGIN_OPTIONS = new Set(['wordpress', 'mcp']);
+// Canonical Notion contract (Journal Summaries DB):
+// Name (title), PostgresID (number), Date (date), Origin (select),
+// Daily Reflection (rich_text).
+// Keep these keys in sync with the Notion database schema to avoid runtime validation errors.
 const TITLE_PROPERTY = 'Name';
 
 export interface SyncJournalLogsResult {
@@ -35,8 +38,8 @@ export class SyncJournalLogsService {
     options?: { limit?: number }
   ): Promise<SyncJournalLogsResult> {
     const limit = Number.isFinite(options?.limit)
-      ? Math.min(Math.max(Math.trunc(options?.limit ?? 5), 1), 250)
-      : 5;
+      ? Math.min(Math.max(Math.trunc(options?.limit ?? 20), 1), 250)
+      : 20;
 
     const logs = await this.findRecentByUser(userId, limit);
 
@@ -46,8 +49,7 @@ export class SyncJournalLogsService {
 
     for (const log of logs) {
       try {
-        const title = this.buildTitle(log.created_at);
-        const existingPageId = await this.findPageIdByTitle(title);
+        const existingPageId = await this.findPageIdByPostgresId(log.id);
         const properties = this.toNotionProperties(log);
 
         if (existingPageId) {
@@ -60,12 +62,32 @@ export class SyncJournalLogsService {
           await this.notion.pages.create({
             parent: { database_id: this.journalSummariesDbId },
             properties: properties as any,
+            children: [
+              {
+                object: 'block',
+                type: 'heading_2',
+                heading_2: { rich_text: [{ text: { content: 'Journal Reflection' } }] },
+              },
+              {
+                object: 'block',
+                type: 'paragraph',
+                paragraph: {
+                  rich_text: [
+                    {
+                      text: {
+                        content: this.limitText(log.content_html || 'No content provided.'),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
           });
           created += 1;
         }
       } catch (error) {
         failed += 1;
-        console.error(`Failed to sync journal log ${log.id}:`, error);
+        console.error(`❌ Failed to sync journal log ${log.id}:`, error);
       }
     }
 
@@ -96,13 +118,13 @@ export class SyncJournalLogsService {
     return rows;
   }
 
-  private async findPageIdByTitle(title: string): Promise<string | null> {
+  private async findPageIdByPostgresId(logId: number): Promise<string | null> {
     const response = await this.notion.databases.query({
       database_id: this.journalSummariesDbId,
       filter: {
-        property: TITLE_PROPERTY,
-        title: {
-          equals: title,
+        property: 'PostgresID',
+        number: {
+          equals: logId,
         },
       },
       page_size: 1,
@@ -113,50 +135,63 @@ export class SyncJournalLogsService {
 
   private toNotionProperties(log: JournalLogRow): Record<string, unknown> {
     const createdAt = this.toIsoDate(log.created_at);
-    const title = this.buildTitle(log.created_at);
-    const summaryMarkdown = log.content_html ?? '';
-    const answersJson = JSON.stringify(log.answers ?? null);
+    const dateStr = createdAt.split('T')[0] || createdAt;
+    const reflectionText = this.buildReflectionText(log.answers);
 
     return {
       [TITLE_PROPERTY]: {
-        title: [{ text: { content: title } }],
+        title: [{ text: { content: `JOURNAL-${log.id} (${dateStr})` } }],
       },
-      'User ID': {
-        number: log.user_id,
+      PostgresID: {
+        number: log.id,
       },
-      'Period Start': {
+      Date: {
         date: { start: createdAt },
       },
-      'Summary HTML': {
-        rich_text: summaryMarkdown ? [{ text: { content: this.limitText(summaryMarkdown) } }] : [],
-      },
-      'Answers JSON': {
-        rich_text: [{ text: { content: this.limitText(answersJson) } }],
-      },
       Origin: {
-        select: { name: this.normalizeOrigin(log.origin) },
+        select: { name: this.limitText(log.origin || 'wordpress', 100) },
+      },
+      'Daily Reflection': {
+        rich_text: [{ text: { content: this.limitText(reflectionText, 2000) } }],
       },
     };
   }
 
-  private buildTitle(createdAt: Date): string {
-    const date = new Date(createdAt);
-    const yyyy = date.getUTCFullYear();
-    const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
-    const dd = String(date.getUTCDate()).padStart(2, '0');
-    return `Journal: ${yyyy}-${mm}-${dd}`;
+  private buildReflectionText(answers: JournalLogRow['answers']): string {
+    if (!answers) {
+      return '';
+    }
+
+    if (Array.isArray(answers)) {
+      return answers
+        .map((item) => {
+          if (item && typeof item === 'object') {
+            const question = 'question' in item ? String(item.question ?? '') : '';
+            const answer = 'answer' in item ? String(item.answer ?? '') : '';
+            if (question || answer) {
+              return `${question}\n${answer}`.trim();
+            }
+            return Object.entries(item)
+              .map(([k, v]) => `${k}\n${String(v ?? '')}`)
+              .join('\n');
+          }
+          return String(item ?? '');
+        })
+        .filter(Boolean)
+        .join('\n\n');
+    }
+
+    if (typeof answers === 'object') {
+      return Object.entries(answers)
+        .map(([q, a]) => `${q}\n${String(a ?? '')}`)
+        .join('\n\n');
+    }
+
+    return String(answers);
   }
 
   private toIsoDate(createdAt: Date): string {
     return new Date(createdAt).toISOString();
-  }
-
-  private normalizeOrigin(origin: string | null): string {
-    if (!origin) {
-      return 'wordpress';
-    }
-
-    return ORIGIN_OPTIONS.has(origin) ? origin : 'mcp';
   }
 
   private limitText(value: string, maxLength = 1900): string {
@@ -164,15 +199,15 @@ export class SyncJournalLogsService {
   }
 }
 
-export const syncLatestJournalLogs = async (userId: number, limit = 5) => {
+export const syncLatestJournalLogs = async (userId: number, limit = 20) => {
   const service = new SyncJournalLogsService();
   return service.syncLatestJournalLogs(userId, { limit });
 };
 
-export const getJournalLogs = async (userId: number, limit = 5) => {
+export const getJournalLogs = async (userId: number, limit = 20) => {
   const normalizedLimit = Number.isFinite(limit)
     ? Math.min(Math.max(Math.trunc(limit), 1), 250)
-    : 5;
+    : 20;
 
   const sql = `
     SELECT

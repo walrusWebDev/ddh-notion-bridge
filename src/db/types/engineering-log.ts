@@ -1,6 +1,7 @@
 export interface EngineeringLogRow {
   id: number;
   user_id: number;
+  project: string | null;
   content: string;
   scope: string | null;
   decision: string | null;

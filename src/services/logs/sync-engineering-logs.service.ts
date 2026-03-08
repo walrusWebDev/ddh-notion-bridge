@@ -3,15 +3,18 @@ import { env } from '../../config/env.js';
 import { EngineeringLogRepository } from '../../db/repositories/engineering-log.repository.js';
 import type { EngineeringLogRow } from '../../db/types/engineering-log.js';
 
-const ORIGIN_OPTIONS = new Set(['cli', 'wordpress', 'telemetry', 'mcp']);
-const FRICTION_OPTIONS = new Set(['None', 'Low', 'Medium', 'High', 'Blocked']);
+// Canonical Notion contract (Engineering Logs DB):
+// Name (title), PostgresID (number), Project (select), Date (date),
+// Friction (rich_text), Decision (rich_text), Rationale (rich_text),
+// Scope (select), Tags (multi_select).
+// Keep these keys in sync with the Notion database schema to avoid runtime validation errors.
 const TITLE_PROPERTY = 'Name';
 
 export interface SyncEngineeringLogsResult {
-  processed: number;
+  status: 'success';
   created: number;
   updated: number;
-  failed: number;
+  total: number;
 }
 
 export class SyncEngineeringLogsService {
@@ -45,49 +48,47 @@ export class SyncEngineeringLogsService {
 
     let created = 0;
     let updated = 0;
-    let failed = 0;
-
     for (const log of logs) {
-      try {
-        const existingPageId = await this.findPageIdByLogId(log.id);
-        const properties = this.toNotionProperties(log);
+      const existingPageId = await this.findPageIdByPostgresId(log.id);
+      const properties = this.toNotionProperties(log);
 
-        if (existingPageId) {
-          await this.notion.pages.update({
-            page_id: existingPageId,
-            properties: properties as any,
-          });
-          updated += 1;
-        } else {
-          await this.notion.pages.create({
-            parent: { database_id: this.engineeringLogsDbId },
-            properties: properties as any,
-          });
-          created += 1;
-        }
-      } catch (error) {
-        failed += 1;
-        console.error(`Failed to sync engineering log ${log.id}:`, error);
+      if (existingPageId) {
+        await this.notion.pages.update({
+          page_id: existingPageId,
+          properties: properties as any,
+        });
+        updated += 1;
+      } else {
+        await this.notion.pages.create({
+          parent: { database_id: this.engineeringLogsDbId },
+          properties: properties as any,
+          children: [
+            {
+              object: 'block',
+              type: 'paragraph',
+              paragraph: { rich_text: [{ text: { content: this.limitText(log.content) } }] },
+            },
+          ],
+        });
+        created += 1;
       }
     }
 
     return {
-      processed: logs.length,
+      status: 'success',
       created,
       updated,
-      failed,
+      total: logs.length,
     };
   }
 
-  private async findPageIdByLogId(logId: number): Promise<string | null> {
-    const title = `LOG-${logId}`;
-
+  private async findPageIdByPostgresId(logId: number): Promise<string | null> {
     const response = await this.notion.databases.query({
       database_id: this.engineeringLogsDbId,
       filter: {
-        property: TITLE_PROPERTY,
-        title: {
-          equals: title,
+        property: 'PostgresID',
+        number: {
+          equals: logId,
         },
       },
       page_size: 1,
@@ -99,70 +100,37 @@ export class SyncEngineeringLogsService {
   private toNotionProperties(log: EngineeringLogRow): Record<string, unknown> {
     const createdAt =
       log.created_at instanceof Date ? log.created_at.toISOString() : new Date(log.created_at).toISOString();
-
-    const normalizedFriction = this.normalizeFriction(log.friction);
-    const origin = this.normalizeOrigin(log.origin);
     const tags = Array.isArray(log.tags) ? log.tags.filter(Boolean) : [];
 
     return {
       [TITLE_PROPERTY]: {
         title: [{ text: { content: `LOG-${log.id}` } }],
       },
-      'User ID': {
-        number: log.user_id,
+      Project: {
+        select: { name: this.limitText(log.project || 'General', 100) },
       },
-      'Logged At': {
+      PostgresID: {
+        number: log.id,
+      },
+      Date: {
         date: { start: createdAt },
       },
-      Content: {
-        rich_text: [{ text: { content: this.limitText(log.content) } }],
-      },
-      Scope: {
-        select: log.scope ? { name: this.limitText(log.scope, 100) } : null,
+      Friction: {
+        rich_text: [{ text: { content: this.limitText(log.friction || '') } }],
       },
       Decision: {
-        rich_text: log.decision ? [{ text: { content: this.limitText(log.decision) } }] : [],
+        rich_text: [{ text: { content: this.limitText(log.decision || '') } }],
       },
-      Friction: {
-        rich_text: [{ text: { content: normalizedFriction } }],
+      Rationale: {
+        rich_text: [{ text: { content: this.limitText(log.rationale || '') } }],
       },
-      'Friction Notes': {
-        rich_text: log.friction ? [{ text: { content: this.limitText(log.friction) } }] : [],
+      Scope: {
+        select: { name: this.limitText(log.scope || 'cli', 100) },
       },
       Tags: {
         multi_select: tags.map((tag) => ({ name: this.limitText(tag, 100) })),
       },
-      Origin: {
-        select: { name: origin },
-      },
     };
-  }
-
-  private normalizeOrigin(origin: string | null): string {
-    if (!origin) {
-      return 'cli';
-    }
-
-    return ORIGIN_OPTIONS.has(origin) ? origin : 'mcp';
-  }
-
-  private normalizeFriction(friction: string | null): string {
-    if (!friction) {
-      return 'None';
-    }
-
-    if (FRICTION_OPTIONS.has(friction)) {
-      return friction;
-    }
-
-    const value = friction.toLowerCase();
-
-    if (value.includes('block')) return 'Blocked';
-    if (value.includes('high')) return 'High';
-    if (value.includes('medium')) return 'Medium';
-    if (value.includes('low')) return 'Low';
-
-    return 'None';
   }
 
   private limitText(value: string, maxLength = 1900): string {
