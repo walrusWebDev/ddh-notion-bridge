@@ -143,9 +143,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 import express from 'express';
 
 const app = express();
-const WEBHOOK_PORT = 3333; // Pick a port that doesn't collide with your other tools
+const PORT = process.env.PORT || 3333;
 
-app.post('/webhook/sync', async (req, res) => {
+app.post('/webhook/sync', async (_req: any, res: any) => {
 	console.error('🔔 Local Sync Signal Received!');
 	try {
 		// Trigger both syncs immediately
@@ -158,6 +158,6 @@ app.post('/webhook/sync', async (req, res) => {
 	}
 });
 
-app.listen(WEBHOOK_PORT, () => {
-	console.error(`🚀 Local Webhook Listener active on port ${WEBHOOK_PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+	console.error(`🚀 Bridge Webhook Service active on port ${PORT}`);
 });
