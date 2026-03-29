@@ -4,6 +4,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { getEngineeringLogs, syncLatestEngineeringLogs } from '../services/logs/sync-engineering-logs.service.js';
 import { getJournalLogs, syncLatestJournalLogs } from '../services/logs/sync-journal-logs.service.js';
+import notionClient from '../services/notion/NotionClient.js';
 
 const LIMIT_MIN = 1;
 const LIMIT_MAX = 250;
@@ -24,6 +25,15 @@ const syncInputSchema = {
 		.optional()
 		.describe(`Optional number of rows to sync (${LIMIT_MIN}-${LIMIT_MAX}).`),
 };
+
+const restartRampSchema = {
+	projectName: z.string().min(1).describe('Project or repository name.'),
+	fogScore: z.enum(['Low', 'Med', 'High']).describe('Fog score rating.'),
+	synthesis: z.string().min(1).describe('Synthesis summary for the restart ramp.'),
+};
+
+const limitNotionText = (value: string, maxLength = 1900): string =>
+	value.length > maxLength ? value.slice(0, maxLength) : value;
 
 server.registerTool(
 	'sync_engineering_logs',
@@ -124,6 +134,60 @@ server.registerTool(
 	async ({ userId, limit }) => {
 		const logs = await getJournalLogs(userId, limit ?? DEFAULT_LIMIT);
 		return { content: [{ type: 'text', text: JSON.stringify(logs, null, 2) }] };
+	}
+);
+
+server.registerTool(
+	'publish_restart_ramp',
+	{
+		description: 'Publish a Restart Ramp synthesis entry to the Notion Restart Ramp database.',
+		inputSchema: restartRampSchema,
+	},
+	async ({ projectName, fogScore, synthesis }) => {
+		const databaseId = process.env.NOTION_RESTART_RAMP_DATABASE_ID;
+		if (!databaseId) {
+			throw new Error('Missing NOTION_RESTART_RAMP_DATABASE_ID. Cannot publish restart ramp entry.');
+		}
+
+		const response = await notionClient.pages.create({
+			parent: { database_id: databaseId },
+			properties: {
+				['Project/Repo']: {
+					title: [{ text: { content: limitNotionText(projectName, 200) } }],
+				},
+				['Fog Score']: {
+					select: { name: fogScore },
+				},
+			},
+			children: [
+				{
+					object: 'block',
+					type: 'paragraph',
+					paragraph: {
+						rich_text: [{ text: { content: limitNotionText(synthesis) } }],
+					},
+				},
+			],
+		});
+
+		return {
+			content: [
+				{
+					type: 'text',
+					text: JSON.stringify(
+						{
+							tool: 'publish_restart_ramp',
+							projectName,
+							fogScore,
+							synthesisLength: synthesis.length,
+							pageId: response.id,
+						},
+						null,
+						2
+					),
+				},
+			],
+		};
 	}
 );
 
