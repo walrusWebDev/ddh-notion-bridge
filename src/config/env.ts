@@ -27,6 +27,7 @@ export const env = {
   notionParentPageId: process.env.PARENT_PAGE_ID,
   engineeringLogsDbId: process.env.ENGINEERING_LOGS_DB_ID,
   journalSummariesDbId: process.env.JOURNAL_SUMMARIES_DB_ID,
+  notionRestartRampDatabaseId: process.env.NOTION_RESTART_RAMP_DATABASE_ID,
 
   // Railway-style single URL (optional)
   databaseUrl: process.env.DATABASE_URL,

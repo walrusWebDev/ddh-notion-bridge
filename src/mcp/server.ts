@@ -1,4 +1,5 @@
 import '../config/env.js';
+import { env } from '../config/env.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -27,9 +28,11 @@ const syncInputSchema = {
 };
 
 const restartRampSchema = {
-	projectName: z.string().min(1).describe('Project or repository name.'),
-	fogScore: z.enum(['Low', 'Med', 'High']).describe('Fog score rating.'),
-	synthesis: z.string().min(1).describe('Synthesis summary for the restart ramp.'),
+    projectName: z.string().min(1),
+    fogScore: z.enum(['Low', 'Med', 'High']),
+    priority: z.enum(['P0 (Critical)', 'P1 (High)', 'P2 (Normal)']), // Added
+    status: z.enum(['Ready', 'In Progress', 'Blocked']), // Added
+    synthesis: z.string().min(1),
 };
 
 const limitNotionText = (value: string, maxLength = 1900): string =>
@@ -143,8 +146,8 @@ server.registerTool(
 		description: 'Publish a Restart Ramp synthesis entry to the Notion Restart Ramp database.',
 		inputSchema: restartRampSchema,
 	},
-	async ({ projectName, fogScore, synthesis }) => {
-		const databaseId = process.env.NOTION_RESTART_RAMP_DATABASE_ID;
+	async ({ projectName, fogScore, priority, status, synthesis }) => {
+		const databaseId = env.notionRestartRampDatabaseId;
 		if (!databaseId) {
 			throw new Error('Missing NOTION_RESTART_RAMP_DATABASE_ID. Cannot publish restart ramp entry.');
 		}
@@ -152,12 +155,10 @@ server.registerTool(
 		const response = await notionClient.pages.create({
 			parent: { database_id: databaseId },
 			properties: {
-				['Project/Repo']: {
-					title: [{ text: { content: limitNotionText(projectName, 200) } }],
-				},
-				['Fog Score']: {
-					select: { name: fogScore },
-				},
+				['Project/Repo']: { title: [{ text: { content: projectName } }] },
+				['Fog Score']: { select: { name: fogScore } },
+				['Priority']: { select: { name: priority } }, // Added
+				['Operational State']: { status: { name: status } }, // Added
 			},
 			children: [
 				{
